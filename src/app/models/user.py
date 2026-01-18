@@ -17,7 +17,14 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(30))
     username: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String)
+    hashed_password: Mapped[str | None] = mapped_column(String, default=None)
+
+    # OAuth provider fields
+    # These store the unique user ID from each OAuth provider (Google/Apple)
+    # When a user logs in via OAuth, we look up by these IDs instead of password
+    google_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, default=None)
+    apple_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, default=None)
+    auth_provider: Mapped[str] = mapped_column(String(20), default="email")  # "email", "google", "apple"
 
     profile_image_url: Mapped[str] = mapped_column(String, default="https://profileimageurl.com")
     uuid: Mapped[uuid_pkg.UUID] = mapped_column(UUID(as_uuid=True), default_factory=uuid7, unique=True)
