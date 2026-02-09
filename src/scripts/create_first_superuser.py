@@ -35,7 +35,10 @@ async def create_first_user(session: AsyncSession) -> None:
                 Column("name", String(30), nullable=False),
                 Column("username", String(20), nullable=False, unique=True, index=True),
                 Column("email", String(50), nullable=False, unique=True, index=True),
-                Column("hashed_password", String, nullable=False),
+                Column("hashed_password", String, nullable=True),
+                Column("google_id", String(255), unique=True, index=True, nullable=True),
+                Column("apple_id", String(255), unique=True, index=True, nullable=True),
+                Column("auth_provider", String(20), nullable=False, default="email"),
                 Column("profile_image_url", String, default="https://profileimageurl.com"),
                 Column("uuid", UUID(as_uuid=True), default=uuid7, unique=True),
                 Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False),
@@ -51,6 +54,7 @@ async def create_first_user(session: AsyncSession) -> None:
                 "email": email,
                 "username": username,
                 "hashed_password": hashed_password,
+                "auth_provider": "email",
                 "is_superuser": True,
             }
 
