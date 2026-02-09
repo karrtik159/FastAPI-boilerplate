@@ -1,147 +1,130 @@
-"""
-Enhanced logging configuration with file rotation and configurable settings.
-
-This module provides a centralized logging setup that:
-- Supports console and file logging
-- Uses RotatingFileHandler for automatic log rotation
-- Respects environment-based configuration via LoggingSettings
-- Provides colored console output for development
-"""
-
 import logging
 import os
-import sys
 from logging.handlers import RotatingFileHandler
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .config import LoggingSettings
+import structlog
+from structlog.dev import ConsoleRenderer
+from structlog.processors import JSONRenderer
+from structlog.types import EventDict, Processor
 
-
-# ANSI color codes for console output
-class LogColors:
-    """ANSI color codes for log level highlighting."""
-
-    RESET = "\033[0m"
-    DEBUG = "\033[36m"  # Cyan
-    INFO = "\033[32m"  # Green
-    WARNING = "\033[33m"  # Yellow
-    ERROR = "\033[31m"  # Red
-    CRITICAL = "\033[35m"  # Magenta
+from ..core.config import settings
 
 
-class ColoredFormatter(logging.Formatter):
-    """Custom formatter that adds colors to log levels for console output."""
+def drop_color_message_key(_, __, event_dict: EventDict) -> EventDict:
+    """Uvicorn adds `color_message` which duplicates `event`.
 
-    LEVEL_COLORS = {
-        logging.DEBUG: LogColors.DEBUG,
-        logging.INFO: LogColors.INFO,
-        logging.WARNING: LogColors.WARNING,
-        logging.ERROR: LogColors.ERROR,
-        logging.CRITICAL: LogColors.CRITICAL,
-    }
-
-    def format(self, record: logging.LogRecord) -> str:
-        # Add color to the level name
-        color = self.LEVEL_COLORS.get(record.levelno, LogColors.RESET)
-        record.levelname = f"{color}{record.levelname}{LogColors.RESET}"
-        return super().format(record)
-
-
-def setup_logging(settings: "LoggingSettings") -> logging.Logger:
-    """Configure and return the root logger based on settings.
-
-    Parameters
-    ----------
-    settings : LoggingSettings
-        Logging configuration settings.
-
-    Returns
-    -------
-    logging.Logger
-        Configured root logger instance.
+    Remove it to avoid double logging.
     """
-    # Create log directory if it doesn't exist
-    log_dir = settings.LOG_DIR
-    if not os.path.isabs(log_dir):
-        # Make relative paths relative to the app directory
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), log_dir)
-
-    os.makedirs(log_dir, exist_ok=True)
-
-    log_file_path = os.path.join(log_dir, settings.LOG_FILE)
-
-    # Get numeric log level
-    log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-
-    # Remove existing handlers to avoid duplicates
-    root_logger.handlers.clear()
-
-    # Console handler with colors
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level)
-    console_formatter = ColoredFormatter(
-        fmt=settings.LOG_FORMAT,
-        datefmt=settings.LOG_DATE_FORMAT,
-    )
-    console_handler.setFormatter(console_formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler with rotation
-    file_handler = RotatingFileHandler(
-        filename=log_file_path,
-        maxBytes=settings.LOG_MAX_BYTES,
-        backupCount=settings.LOG_BACKUP_COUNT,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(log_level)
-    file_formatter = logging.Formatter(
-        fmt=settings.LOG_FORMAT,
-        datefmt=settings.LOG_DATE_FORMAT,
-    )
-    file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(file_handler)
-
-    # Reduce noise from third-party libraries
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-
-    return root_logger
+    event_dict.pop("color_message", None)
+    return event_dict
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger instance for the given name.
+def file_log_filter_processors(_, __, event_dict: EventDict) -> EventDict:
+    """Filter out the request ID, path, method, client host, and status code from the event dict if the
+    corresponding setting is False."""
 
-    Parameters
-    ----------
-    name : str
-        Name for the logger (typically __name__).
+    if not settings.FILE_LOG_INCLUDE_REQUEST_ID:
+        event_dict.pop("request_id", None)
+    if not settings.FILE_LOG_INCLUDE_PATH:
+        event_dict.pop("path", None)
+    if not settings.FILE_LOG_INCLUDE_METHOD:
+        event_dict.pop("method", None)
+    if not settings.FILE_LOG_INCLUDE_CLIENT_HOST:
+        event_dict.pop("client_host", None)
+    if not settings.FILE_LOG_INCLUDE_STATUS_CODE:
+        event_dict.pop("status_code", None)
+    return event_dict
 
-    Returns
-    -------
-    logging.Logger
-        Logger instance.
-    """
-    return logging.getLogger(name)
+
+def console_log_filter_processors(_, __, event_dict: EventDict) -> EventDict:
+    """Filter out the request ID, path, method, client host, and status code from the event dict if the
+    corresponding setting is False."""
+
+    if not settings.CONSOLE_LOG_INCLUDE_REQUEST_ID:
+        event_dict.pop("request_id", None)
+    if not settings.CONSOLE_LOG_INCLUDE_PATH:
+        event_dict.pop("path", None)
+    if not settings.CONSOLE_LOG_INCLUDE_METHOD:
+        event_dict.pop("method", None)
+    if not settings.CONSOLE_LOG_INCLUDE_CLIENT_HOST:
+        event_dict.pop("client_host", None)
+    if not settings.CONSOLE_LOG_INCLUDE_STATUS_CODE:
+        event_dict.pop("status_code", None)
+    return event_dict
 
 
-# Default initialization for backwards compatibility
-# This will be overridden when setup_logging is called with settings
+# Shared processors for all loggers
+timestamper = structlog.processors.TimeStamper(fmt="iso")
+SHARED_PROCESSORS: list[Processor] = [
+    structlog.contextvars.merge_contextvars,
+    structlog.stdlib.add_logger_name,
+    structlog.stdlib.add_log_level,
+    structlog.stdlib.PositionalArgumentsFormatter(),
+    structlog.stdlib.ExtraAdder(),
+    drop_color_message_key,
+    timestamper,
+    structlog.processors.StackInfoRenderer(),
+]
+
+
+# Configure structlog globally
+structlog.configure(
+    processors=SHARED_PROCESSORS + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+
+def build_formatter(*, json_output: bool, pre_chain: list[Processor]) -> structlog.stdlib.ProcessorFormatter:
+    """Build a ProcessorFormatter with the specified renderer and processors."""
+    renderer = JSONRenderer() if json_output else ConsoleRenderer()
+
+    processors = [structlog.stdlib.ProcessorFormatter.remove_processors_meta, renderer]
+
+    if json_output:
+        pre_chain = pre_chain + [structlog.processors.format_exc_info]
+
+    return structlog.stdlib.ProcessorFormatter(foreign_pre_chain=pre_chain, processors=processors)
+
+
+# Setup log directory
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR)
+os.makedirs(LOG_DIR, exist_ok=True)
 
-LOG_FILE_PATH = os.path.join(LOG_DIR, "app.log")
-LOGGING_LEVEL = logging.INFO
-LOGGING_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-logging.basicConfig(level=LOGGING_LEVEL, format=LOGGING_FORMAT)
+# File handler configuration
+file_handler = RotatingFileHandler(
+    filename=os.path.join(LOG_DIR, "app.log"),
+    maxBytes=settings.FILE_LOG_MAX_BYTES,
+    backupCount=settings.FILE_LOG_BACKUP_COUNT,
+)
+file_handler.setLevel(settings.FILE_LOG_LEVEL)
+file_handler.setFormatter(
+    build_formatter(
+        json_output=settings.FILE_LOG_FORMAT_JSON, pre_chain=SHARED_PROCESSORS + [file_log_filter_processors]
+    )
+)
 
-_file_handler = RotatingFileHandler(LOG_FILE_PATH, maxBytes=10485760, backupCount=5)
-_file_handler.setLevel(LOGGING_LEVEL)
-_file_handler.setFormatter(logging.Formatter(LOGGING_FORMAT))
-logging.getLogger("").addHandler(_file_handler)
+# Console handler configuration
+console_handler = logging.StreamHandler()
+console_handler.setLevel(settings.CONSOLE_LOG_LEVEL)
+console_handler.setFormatter(
+    build_formatter(
+        json_output=settings.CONSOLE_LOG_FORMAT_JSON, pre_chain=SHARED_PROCESSORS + [console_log_filter_processors]
+    )
+)
+
+
+# Root logger configuration
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.handlers.clear()  # avoid duplicate logs
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# Uvicorn logger integration
+for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    logger = logging.getLogger(logger_name)
+    logger.handlers.clear()
+    logger.propagate = True
+    logger.setLevel(logging.INFO)

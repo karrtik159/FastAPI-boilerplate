@@ -21,6 +21,32 @@ class CryptSettings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
 
+class FileLoggerSettings(BaseSettings):
+    FILE_LOG_MAX_BYTES: int = 10 * 1024 * 1024
+    FILE_LOG_BACKUP_COUNT: int = 5
+    FILE_LOG_FORMAT_JSON: bool = True
+    FILE_LOG_LEVEL: str = "INFO"
+
+    # Include request ID, path, method, client host, and status code in the file log
+    FILE_LOG_INCLUDE_REQUEST_ID: bool = True
+    FILE_LOG_INCLUDE_PATH: bool = True
+    FILE_LOG_INCLUDE_METHOD: bool = True
+    FILE_LOG_INCLUDE_CLIENT_HOST: bool = True
+    FILE_LOG_INCLUDE_STATUS_CODE: bool = True
+
+
+class ConsoleLoggerSettings(BaseSettings):
+    CONSOLE_LOG_LEVEL: str = "INFO"
+    CONSOLE_LOG_FORMAT_JSON: bool = False
+
+    # Include request ID, path, method, client host, and status code in the console log
+    CONSOLE_LOG_INCLUDE_REQUEST_ID: bool = False
+    CONSOLE_LOG_INCLUDE_PATH: bool = False
+    CONSOLE_LOG_INCLUDE_METHOD: bool = False
+    CONSOLE_LOG_INCLUDE_CLIENT_HOST: bool = False
+    CONSOLE_LOG_INCLUDE_STATUS_CODE: bool = False
+
+
 class DatabaseSettings(BaseSettings):
     pass
 
@@ -74,7 +100,8 @@ class FirstUserSettings(BaseSettings):
     ADMIN_PASSWORD: str = "!Ch4ng3Th1sP4ssW0rd!"
 
 
-class TestSettings(BaseSettings): ...
+class TestSettings(BaseSettings):
+    ...
 
 
 class RedisCacheSettings(BaseSettings):
@@ -203,6 +230,8 @@ class Settings(
     EnvironmentSettings,
     CORSSettings,
     LoggingSettings,
+    FileLoggerSettings,
+    ConsoleLoggerSettings,
 ):
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", ".env"),

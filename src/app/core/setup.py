@@ -16,6 +16,7 @@ from ..api.dependencies import get_current_superuser
 from ..core.utils.rate_limit import rate_limiter
 from ..middleware import ExceptionHandlerMiddleware, LoggingMiddleware, setup_exception_handlers
 from ..middleware.client_cache_middleware import ClientCacheMiddleware
+from ..middleware.logger_middleware import LoggerMiddleware
 from ..models import *  # noqa: F403
 from .config import (
     AppSettings,
@@ -246,7 +247,7 @@ def create_application(
             allow_methods=settings.CORS_METHODS,
             allow_headers=settings.CORS_HEADERS,
         )
-
+    application.add_middleware(LoggerMiddleware)
     if isinstance(settings, EnvironmentSettings):
         if settings.ENVIRONMENT != EnvironmentOption.PRODUCTION:
             docs_router = APIRouter()
