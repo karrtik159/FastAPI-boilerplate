@@ -14,7 +14,7 @@ from fastapi.openapi.utils import get_openapi
 
 from ..api.dependencies import get_current_superuser
 from ..core.utils.rate_limit import rate_limiter
-from ..middleware import ExceptionHandlerMiddleware, LoggingMiddleware, setup_exception_handlers
+from ..middleware import ExceptionHandlerMiddleware, setup_exception_handlers
 from ..middleware.client_cache_middleware import ClientCacheMiddleware
 from ..middleware.logger_middleware import LoggerMiddleware
 from ..models import *  # noqa: F403
@@ -33,7 +33,6 @@ from .config import (
 )
 from .db.database import Base
 from .db.database import async_engine as engine
-from .logger import setup_logging
 from .utils import cache, queue
 
 
@@ -214,10 +213,6 @@ def create_application(
     application = FastAPI(lifespan=lifespan, **kwargs)
     application.include_router(router)
 
-    # Initialize logging if LoggingSettings is provided
-    if isinstance(settings, LoggingSettings):
-        setup_logging(settings)
-
     # Register exception handlers (catches validation errors during request parsing)
     # This must be done BEFORE adding middlewares
     setup_exception_handlers(application)
@@ -227,14 +222,8 @@ def create_application(
         is_debug = settings.ENVIRONMENT != EnvironmentOption.PRODUCTION
         application.add_middleware(ExceptionHandlerMiddleware, debug=is_debug)  # type: ignore[arg-type]
 
-    # Logging middleware (logs all requests/responses)
-    if isinstance(settings, LoggingSettings):
-        application.add_middleware(
-            LoggingMiddleware,  # type: ignore[arg-type]
-            log_request_body=settings.LOG_REQUEST_BODY,
-            log_response_body=settings.LOG_RESPONSE_BODY,
-            exclude_paths=settings.LOG_EXCLUDE_PATHS,
-        )
+    # Structlog Logger middleware (adds request context)
+    application.add_middleware(LoggerMiddleware)  # type: ignore[arg-type]
 
     if isinstance(settings, ClientSideCacheSettings):
         application.add_middleware(ClientCacheMiddleware, max_age=settings.CLIENT_CACHE_MAX_AGE)  # type: ignore[arg-type]
